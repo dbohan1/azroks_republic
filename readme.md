@@ -63,6 +63,12 @@ python azroks_republic.py
 |---|---|
 | ![Game over screen — Republic victory](screenshots/10_game_over_republic.png) | ![Game over screen — Drow victory](screenshots/11_game_over_drow.png) |
 
+### Game Log — Wealth Chart
+![Game log screen showing a line chart of each player's wealth across turns](screenshots/12_game_log_chart.png)
+
+### Game Log — Transcript
+![Game log screen showing the full turn-by-turn transcript with colour-coded events](screenshots/13_game_log_transcript.png)
+
 ---
 
 ## Setup
