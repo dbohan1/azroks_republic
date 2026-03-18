@@ -30,6 +30,41 @@ python azroks_republic.py
 
 ---
 
+## Screenshots
+
+### Setup
+![Game setup screen showing player count and name entry](screenshots/01_setup.png)
+
+### Role Reveal
+| Hidden | Revealed |
+|---|---|
+| ![Role reveal screen with hidden role](screenshots/02_role_reveal_hidden.png) | ![Role reveal screen showing the secret role](screenshots/03_role_reveal_shown.png) |
+
+### Turn Start
+![Turn start screen with war status, salary distribution, and dice roll](screenshots/04_turn_start.png)
+
+### Pass the Device
+![Privacy screen prompting the next player to take the device](screenshots/05_privacy.png)
+
+### Player Turn — People's Pot
+![Player turn screen on the People's Pot tab](screenshots/06_player_turn_peoples_pot.png)
+
+### Player Turn — Special Interests
+![Player turn screen on the Special Interests tab showing Labor Improvement, Powder Charge, and Azrok's Dagger](screenshots/07_player_turn_special_interests.png)
+
+### Player Turn — Tax
+![Player turn screen on the Tax tab](screenshots/08_player_turn_tax.png)
+
+### End-of-Turn Resolution
+![End of turn resolution showing war fund check and payout](screenshots/09_end_of_turn.png)
+
+### Game Over
+| Republic Wins | Drow Win |
+|---|---|
+| ![Game over screen — Republic victory](screenshots/10_game_over_republic.png) | ![Game over screen — Drow victory](screenshots/11_game_over_drow.png) |
+
+---
+
 ## Setup
 
 1. Choose the number of players (2–8).
