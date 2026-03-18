@@ -41,49 +41,73 @@ def war_cost(turn: int, num_players: int) -> int:
     per = 1 if turn <= 3 else (2 if turn <= 6 else 3)
     return per * num_players
 
+# AI personality roster  {name: short description}
+AI_TYPES = {
+    "The Idealist": "Invests heavily for the common good. Loyal to the Republic.",
+    "The Miser":    "Hoards every coin and improves tools. Contributes nothing to the pot.",
+    "The Wrecker":  "Sabotages if it serves the Drow. Dangerous and unpredictable.",
+    "The Schemer":  "Uses tax to weaken rivals. Cold, calculating, self-serving.",
+}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  THEME
+#  THEME — Windows 95
 # ══════════════════════════════════════════════════════════════════════════════
 
-BG       = "#1a1a1a"
-BG_MED   = "#2a2a2a"
-BG_CARD  = "#323232"
-RED      = "#c0392b"
-RED_DK   = "#922b21"
-GOLD     = "#e5a817"
-GREEN    = "#1e8449"
-GREEN_LT = "#27ae60"
-DROW_CLR = "#7d3c98"
-TEXT     = "#e8e8e8"
-TEXT_DIM = "#888888"
+BG        = "#c0c0c0"   # Classic Win95 window/button face
+BG_MED    = "#808080"   # Shadow / darker gray
+BG_CARD   = "#c0c0c0"   # Panel face (depth via relief, not color)
+W95_BLUE  = "#000080"   # Title-bar blue
+W95_WHITE = "#ffffff"   # Input field / highlight text
+RED       = "#800000"   # Dark red  (danger actions)
+RED_DK    = "#c00000"
+GOLD      = "#6b5900"   # Dark olive-gold (important/GS)
+GREEN     = "#005000"   # Dark green (positive actions)
+GREEN_LT  = "#006400"
+DROW_CLR  = "#800080"   # Purple (drow / traitor)
+TEXT      = "#000000"   # Standard black text
+TEXT_DIM  = "#444444"   # Dimmed / secondary text
 
-F_TITLE   = ("Georgia",    26, "bold")
-F_HEAD    = ("Georgia",    16, "bold")
-F_SUB     = ("Georgia",    13, "bold")
-F_BODY    = ("Arial",      12)
-F_SMALL   = ("Arial",      10)
-F_MONO    = ("Courier New",11)
-F_BTN     = ("Arial",      12, "bold")
+F_TITLE   = ("MS Sans Serif", 14, "bold")
+F_HEAD    = ("MS Sans Serif", 11, "bold")
+F_SUB     = ("MS Sans Serif", 10, "bold")
+F_BODY    = ("MS Sans Serif",  9)
+F_SMALL   = ("MS Sans Serif",  8)
+F_MONO    = ("Courier New",    9)
+F_BTN     = ("MS Sans Serif",  9)
 
 
 def lbl(parent, text, font=F_BODY, fg=TEXT, bg=BG, anchor="center", justify="center", **kw):
     return tk.Label(parent, text=text, font=font, fg=fg, bg=bg,
                     anchor=anchor, justify=justify, **kw)
 
-def sep(parent, bg=BG_CARD, height=1):
-    return tk.Frame(parent, bg=bg, height=height)
+def sep(parent, bg=BG_MED, height=2):
+    """Win95 sunken-line separator."""
+    return tk.Frame(parent, bg=bg, height=height, relief="sunken", bd=1)
 
-def btn(parent, text, cmd, color=RED, fg=TEXT, width=22, state="normal"):
+def btn(parent, text, cmd, color=BG, fg=TEXT, width=22, state="normal"):
+    """Win95-style raised button."""
     return tk.Button(
         parent, text=text, command=cmd, font=F_BTN,
-        bg=color, fg=fg, activebackground=GOLD, activeforeground=BG,
-        relief="flat", padx=10, pady=7, width=width,
-        cursor="hand2", state=state,
+        bg=color, fg=fg,
+        activebackground=color, activeforeground=fg,
+        relief="raised", bd=2, padx=8, pady=3, width=width,
+        cursor="arrow", state=state,
     )
 
-def card(parent, **kw):
-    return tk.Frame(parent, bg=BG_CARD, padx=12, pady=10, **kw)
+def card(parent, title="", **kw):
+    """Win95-style group-box (LabelFrame with groove border)."""
+    if title:
+        return tk.LabelFrame(parent, text=title, font=F_SMALL, fg=TEXT, bg=BG_CARD,
+                             relief="groove", bd=2, padx=8, pady=6, **kw)
+    return tk.Frame(parent, bg=BG_CARD, relief="groove", bd=2, padx=8, pady=6, **kw)
+
+def titlebar(parent, title):
+    """Simulate a Win95 dialog title bar."""
+    bar = tk.Frame(parent, bg=W95_BLUE, pady=3, padx=6)
+    tk.Label(bar, text=title, font=("MS Sans Serif", 9, "bold"),
+             fg=W95_WHITE, bg=W95_BLUE).pack(side="left")
+    return bar
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -96,6 +120,7 @@ class Player:
         self.sector      = sector
         self.role        = ""
         self.is_gs       = False
+        self.is_ai       = False
         self.money       = 0
         self.improvement = 0   # 0–3
         self.used_tax    = False
@@ -116,6 +141,147 @@ class Player:
         return self.money >= POWDER_COST
     def can_buy_dagger(self) -> bool:
         return self.money >= DAGGER_COST
+
+
+class AIPlayer(Player):
+    """A player slot controlled by an AI personality."""
+
+    def __init__(self, name: str, ai_type: str):
+        super().__init__(name)
+        self.ai_type = ai_type
+        self.is_ai   = True
+
+    # ── Public entry point ────────────────────────────────────────────────────
+
+    def decide(self, game: "GameState") -> tuple:
+        """Execute a full AI turn. Returns (log_lines, game_ended).
+        log_lines is a list of (text, tag) matching EndOfTurnScreen conventions.
+        """
+        log = []
+        log.append((f'[{self.ai_type}] — {AI_TYPES[self.ai_type]}', "dim"))
+
+        if self.ai_type == "The Idealist":
+            self._act_idealist(game, log)
+        elif self.ai_type == "The Miser":
+            self._act_miser(game, log)
+        elif self.ai_type == "The Wrecker":
+            self._act_wrecker(game, log)
+        elif self.ai_type == "The Schemer":
+            self._act_schemer(game, log)
+
+        return log, game.game_over
+
+    # ── Shared action primitives ──────────────────────────────────────────────
+
+    def _do_improve(self, game, log) -> bool:
+        if self.can_improve():
+            self.money -= IMPROVEMENT_COST
+            self.improvement += 1
+            log.append((f"Improved tools to {self.mult_label}. "
+                         f"Next salary: ${self.salary}/turn.", "ok"))
+            return True
+        return False
+
+    def _do_invest(self, game, log, amount: int) -> int:
+        amount = max(0, min(amount, self.money))
+        if amount > 0:
+            self.money -= amount
+            game.people_pot += amount
+            log.append((f"Invested ${amount} in the People's Pot "
+                         f"(pot now ${game.people_pot}).", "ok"))
+        else:
+            log.append(("Invested $0 in the People's Pot. Free-riding!", "dim"))
+        return amount
+
+    def _do_tax(self, game, log) -> bool:
+        if not self.can_tax():
+            return False
+        targets = [p for p in game.players if p is not self]
+        if not targets:
+            return False
+        target = max(targets, key=lambda p: p.money)
+        self.money -= TAX_COST
+        removed = min(target.money, TAX_AMOUNT)
+        target.money -= removed
+        self.used_tax = True
+        log.append((f"Taxed {target.name} — removed ${removed}. "
+                     f"(Money discarded.)", "dim"))
+        return True
+
+    def _do_powder(self, game, log) -> bool:
+        if not self.can_buy_powder():
+            return False
+        self.money -= POWDER_COST
+        game.drow_victories += 1
+        log.append((f"Bought a Powder Charge! Walls breached. "
+                     f"Drow victories: {game.drow_victories}/{MAX_DROW}.", "bad"))
+        if game.drow_victories >= MAX_DROW:
+            game.game_over    = True
+            game.republic_won = False
+            log.append(("The Drow have overcome the Republic! "
+                         "Agents of the Drow WIN!", "bad"))
+        return True
+
+    def _do_dagger(self, game, log) -> bool:
+        if not self.can_buy_dagger():
+            return False
+        self.money -= DAGGER_COST
+        game.game_over    = True
+        game.republic_won = True
+        log.append((f"Bought Azrok's Dagger! The Republic wins IMMEDIATELY!", "ok"))
+        return True
+
+    # ── AI Strategies ─────────────────────────────────────────────────────────
+
+    def _act_idealist(self, game, log):
+        """Cooperates fully. Invests most of their money; upgrades tools modestly."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        # Invest generously — keep a $3 buffer
+        self._do_invest(game, log, max(0, self.money - 3))
+        # Upgrade tools once if early in progression
+        if self.improvement < 2:
+            self._do_improve(game, log)
+
+    def _act_miser(self, game, log):
+        """Hoards money. Improves tools first, then taxes, invests nothing."""
+        if self._do_dagger(game, log):
+            return
+        # Max out tools
+        self._do_improve(game, log)
+        # Kneecap the richest rival
+        self._do_tax(game, log)
+        # Contribute nothing to the pot
+        self._do_invest(game, log, 0)
+
+    def _act_wrecker(self, game, log):
+        """Sabotages if Drow. Acts as a cautious cooperator if Brother."""
+        if "Drow" in self.role:
+            # Buy powder to score Drow victories
+            if self._do_powder(game, log):
+                if game.game_over:
+                    return
+            # Weaken the richest player
+            self._do_tax(game, log)
+            # Never contribute to pot
+            self._do_invest(game, log, 0)
+        else:
+            # Revealed as Brother — play cooperatively
+            if self._do_dagger(game, log):
+                return
+            self._do_invest(game, log, self.money // 2)
+
+    def _act_schemer(self, game, log):
+        """Tax-focused opportunist. Moderate investor, upgrades tools early."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        # Tax first to weaken rivals
+        self._do_tax(game, log)
+        # Invest moderately (1/3 of money)
+        self._do_invest(game, log, max(0, self.money // 3))
+        # Upgrade tools while still cheap
+        if self.improvement < 2:
+            self._do_improve(game, log)
 
 
 class GameState:
@@ -227,8 +393,14 @@ class App(tk.Tk):
         super().__init__()
         self.title("Azrok's Republic")
         self.configure(bg=BG)
-        self.geometry("960x720")
-        self.minsize(800, 600)
+        self.geometry("900x680")
+        self.minsize(760, 560)
+        # Win95-style ttk defaults
+        style = ttk.Style()
+        try:
+            style.theme_use("winnative")
+        except Exception:
+            style.theme_use("default")
         self.game: GameState = None
         self._frame: tk.Frame = None
         self._goto(SetupScreen)
@@ -260,13 +432,18 @@ class App(tk.Tk):
             p.role = r
 
         self.game = GameState(players)
-        self._goto(RoleRevealScreen, player_idx=0)
+        self.next_role_reveal(0)   # skips AI players automatically
 
     def next_role_reveal(self, idx: int):
         if idx >= len(self.game.players):
             self._goto(TurnStartScreen)
         else:
-            self._goto(RoleRevealScreen, player_idx=idx)
+            p = self.game.players[idx]
+            if p.is_ai:
+                # AI players don't need a private role reveal — skip ahead
+                self.next_role_reveal(idx + 1)
+            else:
+                self._goto(RoleRevealScreen, player_idx=idx)
 
     def show_player_turn(self):
         if self.game.current_player is None:
@@ -274,8 +451,12 @@ class App(tk.Tk):
             self._goto(EndOfTurnScreen, lines=lines)
         else:
             p = self.game.current_player
-            self._goto(PrivacyScreen, player=p,
-                       on_continue=lambda: self._goto(PlayerTurnScreen))
+            if p.is_ai:
+                log, ended = p.decide(self.game)
+                self._goto(AITurnScreen, player=p, log=log, game_ended=ended)
+            else:
+                self._goto(PrivacyScreen, player=p,
+                           on_continue=lambda: self._goto(PlayerTurnScreen))
 
     def next_turn(self):
         self._goto(TurnStartScreen)
@@ -291,64 +472,114 @@ class App(tk.Tk):
 class SetupScreen(tk.Frame):
     def __init__(self, master: App, **_):
         super().__init__(master, bg=BG)
-        self.master = master
+        self.master    = master
         self.name_vars = []
+        self.type_vars = []   # "Human" or an AI_TYPES key
         self._build()
 
     def _build(self):
-        lbl(self, "☭  AZROK'S REPUBLIC  ☭", font=F_TITLE, fg=GOLD).pack(pady=(40, 4))
-        lbl(self, "Rules Version 1.4.2", font=F_SMALL, fg=TEXT_DIM).pack()
-        sep(self).pack(fill="x", padx=50, pady=18)
+        titlebar(self, "Azrok's Republic").pack(fill="x")
 
-        lbl(self, "Game Setup", font=F_HEAD, fg=GOLD).pack(pady=(0, 12))
+        lbl(self, "AZROK'S REPUBLIC", font=F_TITLE, fg=W95_BLUE).pack(pady=(22, 2))
+        lbl(self, "Rules Version 1.4.2", font=F_SMALL, fg=TEXT_DIM).pack()
+        sep(self).pack(fill="x", padx=40, pady=12)
+
+        lbl(self, "Game Setup", font=F_HEAD, fg=TEXT).pack(pady=(0, 8))
 
         # Player count row
         row = tk.Frame(self, bg=BG)
         row.pack()
-        lbl(row, "Number of Players:", bg=BG).pack(side="left", padx=(0, 10))
+        lbl(row, "Number of Players:", bg=BG).pack(side="left", padx=(0, 8))
         self.count_var = tk.IntVar(value=4)
         for n in range(2, 9):
             tk.Radiobutton(
                 row, text=str(n), variable=self.count_var, value=n,
-                font=F_BODY, bg=BG, fg=TEXT, selectcolor=BG_MED,
-                activebackground=BG, activeforeground=GOLD,
+                font=F_BODY, bg=BG, fg=TEXT, selectcolor=BG,
+                activebackground=BG, activeforeground=TEXT,
+                relief="flat",
                 command=self._rebuild_names,
-            ).pack(side="left", padx=4)
+            ).pack(side="left", padx=3)
 
-        sep(self).pack(fill="x", padx=50, pady=14)
+        sep(self).pack(fill="x", padx=40, pady=10)
 
         self.names_frame = tk.Frame(self, bg=BG)
         self.names_frame.pack()
         self._rebuild_names()
 
-        sep(self).pack(fill="x", padx=50, pady=14)
-        btn(self, "⚑   BEGIN THE REPUBLIC", self._start, width=32).pack(pady=6)
+        sep(self).pack(fill="x", padx=40, pady=10)
+        btn(self, "Begin the Republic", self._start, color=BG, fg=W95_BLUE, width=28).pack(pady=6)
 
     def _rebuild_names(self):
         for w in self.names_frame.winfo_children():
             w.destroy()
         self.name_vars.clear()
+        self.type_vars.clear()
         n = self.count_var.get()
-        lbl(self.names_frame, "Enter Player Names", font=F_SUB, fg=TEXT).pack(pady=(0, 8))
+
+        # Header row
+        hdr = tk.Frame(self.names_frame, bg=BG)
+        hdr.pack(fill="x", pady=(0, 4))
+        lbl(hdr, "Player",      font=F_SMALL, fg=TEXT_DIM, bg=BG, anchor="w", width=8).pack(side="left")
+        lbl(hdr, "Name",        font=F_SMALL, fg=TEXT_DIM, bg=BG, anchor="w", width=22).pack(side="left", padx=(0, 6))
+        lbl(hdr, "Type",        font=F_SMALL, fg=TEXT_DIM, bg=BG, anchor="w").pack(side="left")
+
+        type_choices = ["Human"] + list(AI_TYPES.keys())
+
         for i in range(n):
             row = tk.Frame(self.names_frame, bg=BG)
             row.pack(pady=2)
-            lbl(row, f"Player {i+1}:", fg=TEXT_DIM, bg=BG, anchor="e").pack(side="left", padx=(0, 8))
-            var = tk.StringVar(value=f"Player {i+1}")
-            self.name_vars.append(var)
-            tk.Entry(row, textvariable=var, font=F_BODY, bg=BG_MED, fg=TEXT,
-                     insertbackground=TEXT, relief="flat", width=22).pack(side="left")
+
+            lbl(row, f"Player {i+1}:", fg=TEXT_DIM, bg=BG, anchor="e", width=8).pack(side="left")
+
+            name_var = tk.StringVar(value=f"Player {i+1}")
+            self.name_vars.append(name_var)
+            entry = tk.Entry(row, textvariable=name_var, font=F_BODY,
+                             bg=W95_WHITE, fg=TEXT, insertbackground=TEXT,
+                             relief="sunken", bd=2, width=20)
+            entry.pack(side="left", padx=(0, 6))
+
+            type_var = tk.StringVar(value="Human")
+            self.type_vars.append(type_var)
+
+            menu = tk.OptionMenu(row, type_var, *type_choices,
+                                 command=lambda val, e=entry, nv=name_var:
+                                     self._on_type_change(val, e, nv))
+            menu.config(font=F_SMALL, bg=BG, fg=TEXT,
+                        activebackground=W95_BLUE, activeforeground=W95_WHITE,
+                        relief="raised", bd=2, width=16)
+            menu["menu"].config(font=F_SMALL, bg=W95_WHITE, fg=TEXT,
+                                activebackground=W95_BLUE, activeforeground=W95_WHITE)
+            menu.pack(side="left")
+
+    def _on_type_change(self, type_val: str, entry: tk.Entry, name_var: tk.StringVar):
+        if type_val != "Human":
+            name_var.set(type_val)   # suggest the AI type as a default name
+        entry.config(state="normal") # always keep editable
 
     def _start(self):
-        n     = self.count_var.get()
-        names = [v.get().strip() for v in self.name_vars[:n]]
-        if any(not nm for nm in names):
-            messagebox.showwarning("Missing Names", "Please enter a name for every player.", parent=self)
-            return
+        n       = self.count_var.get()
+        players = []
+        names   = []
+        for i in range(n):
+            name  = self.name_vars[i].get().strip()
+            ptype = self.type_vars[i].get()
+            if not name:
+                messagebox.showwarning("Missing Name",
+                                       f"Please enter a name for Player {i+1}.", parent=self)
+                return
+            names.append(name)
+            if ptype == "Human":
+                players.append(Player(name))
+            else:
+                players.append(AIPlayer(name, ptype))
+
         if len(set(names)) != len(names):
-            messagebox.showwarning("Duplicate Names", "All player names must be unique.", parent=self)
+            messagebox.showwarning("Duplicate Names",
+                                   "All player names must be unique.\n"
+                                   "Two AI players of the same type will have the same name — "
+                                   "rename one.", parent=self)
             return
-        self.master.start_game([Player(nm) for nm in names])
+        self.master.start_game(players)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -365,26 +596,26 @@ class RoleRevealScreen(tk.Frame):
         total = len(self.master.game.players)
         p     = self.player
 
-        lbl(self, "☭  AZROK'S REPUBLIC  ☭", font=F_TITLE, fg=GOLD).pack(pady=(35, 4))
-        sep(self).pack(fill="x", padx=50, pady=12)
+        titlebar(self, "Azrok's Republic - Role Assignment").pack(fill="x")
+        lbl(self, "AZROK'S REPUBLIC", font=F_TITLE, fg=W95_BLUE).pack(pady=(18, 2))
+        sep(self).pack(fill="x", padx=40, pady=8)
 
         lbl(self, f"Player {self.player_idx + 1} of {total}", font=F_SMALL, fg=TEXT_DIM).pack()
-        lbl(self, "Pass the device to:", font=F_BODY, fg=TEXT_DIM).pack(pady=(10, 2))
-        lbl(self, p.name, font=F_HEAD, fg=GOLD).pack()
-        lbl(self, f"Sector: {p.sector}", font=F_SMALL, fg=TEXT_DIM).pack(pady=3)
+        lbl(self, "Pass the device to:", font=F_BODY, fg=TEXT_DIM).pack(pady=(8, 2))
+        lbl(self, p.name, font=F_HEAD, fg=W95_BLUE).pack()
+        lbl(self, f"Sector: {p.sector}", font=F_SMALL, fg=TEXT_DIM).pack(pady=2)
         if p.is_gs:
-            lbl(self, "★  You are the GENERAL SECRETARY  ★", font=F_SUB, fg=GOLD).pack(pady=4)
+            lbl(self, "[ You are the GENERAL SECRETARY ]", font=F_SUB, fg=GOLD).pack(pady=3)
 
-        sep(self).pack(fill="x", padx=50, pady=12)
+        sep(self).pack(fill="x", padx=40, pady=8)
 
         self.hint = lbl(self, "Your secret role is hidden.\nPress the button to reveal it privately.", fg=TEXT_DIM)
         self.hint.pack(pady=6)
 
         # Role card (hidden until revealed)
-        self.role_card = card(self)
-        role_color = DROW_CLR if "Drow" in p.role else GREEN_LT
-        lbl(self.role_card, "YOUR SECRET ROLE", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
-        lbl(self.role_card, p.role, font=("Georgia", 18, "bold"), fg=role_color, bg=BG_CARD).pack(pady=6)
+        self.role_card = card(self, title="Secret Role")
+        role_color = DROW_CLR if "Drow" in p.role else GREEN
+        lbl(self.role_card, p.role, font=("MS Sans Serif", 13, "bold"), fg=role_color, bg=BG_CARD).pack(pady=4)
         if "Drow" in p.role:
             lbl(self.role_card, "Help the Drow overcome the Republic!\nLet the war fund fail 3 times.",
                 font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
@@ -392,10 +623,10 @@ class RoleRevealScreen(tk.Frame):
             lbl(self.role_card, "Defend the Republic!\nKeep the war fund supplied for all turns.",
                 font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
 
-        self.reveal_btn = btn(self, "👁   Reveal My Role", self._reveal, color=BG_MED, width=26)
-        self.reveal_btn.pack(pady=12)
+        self.reveal_btn = btn(self, "Reveal My Role", self._reveal, color=BG, width=24)
+        self.reveal_btn.pack(pady=10)
 
-        self.next_btn = btn(self, "✔   Hide & Pass Device", self._next, color=GREEN, width=26)
+        self.next_btn = btn(self, "Hide & Pass Device", self._next, color=BG, fg=GREEN, width=24)
 
     def _reveal(self):
         self.hint.pack_forget()
@@ -419,50 +650,50 @@ class TurnStartScreen(tk.Frame):
 
     def _build(self):
         g = self.game
-        lbl(self, "☭  AZROK'S REPUBLIC  ☭", font=F_TITLE, fg=GOLD).pack(pady=(28, 4))
-        sep(self).pack(fill="x", padx=50, pady=10)
+        titlebar(self, f"Azrok's Republic - Turn {g.turn} of {MAX_TURNS}").pack(fill="x")
+        lbl(self, "AZROK'S REPUBLIC", font=F_TITLE, fg=W95_BLUE).pack(pady=(16, 2))
+        sep(self).pack(fill="x", padx=40, pady=8)
 
-        lbl(self, f"Turn {g.turn}  of  {MAX_TURNS}", font=F_HEAD, fg=GOLD).pack(pady=4)
+        lbl(self, f"Turn {g.turn}  of  {MAX_TURNS}", font=F_HEAD, fg=TEXT).pack(pady=3)
 
         # War status banner
-        c = card(self)
-        c.pack(padx=50, pady=4, fill="x")
+        c = card(self, title="War Status")
+        c.pack(padx=40, pady=4, fill="x")
         cost = war_cost(g.turn, len(g.players))
         lbl(c, f"War Fund Required This Turn: ${cost}", fg=TEXT, bg=BG_CARD).pack()
         dc = RED if g.drow_victories > 0 else TEXT_DIM
         lbl(c, f"Drow Victories: {g.drow_victories} / {MAX_DROW}", fg=dc, bg=BG_CARD).pack()
-        # War track visual
         filled = g.turn - 1
-        track  = "█" * filled + "░" * (MAX_TURNS - filled)
-        lbl(c, f"[{track}]", font=F_MONO, fg=TEXT_DIM, bg=BG_CARD).pack(pady=2)
+        track  = "[" + "#" * filled + "." * (MAX_TURNS - filled) + "]"
+        lbl(c, track, font=F_MONO, fg=TEXT_DIM, bg=BG_CARD).pack(pady=2)
 
-        sep(self).pack(fill="x", padx=50, pady=10)
+        sep(self).pack(fill="x", padx=40, pady=8)
 
         # Salary phase
-        lbl(self, "💰  Salary Distribution", font=F_SUB, fg=TEXT).pack(pady=(0, 6))
-        sal_card = card(self)
-        sal_card.pack(padx=50, pady=2, fill="x")
+        lbl(self, "Salary Distribution", font=F_SUB, fg=TEXT).pack(pady=(0, 4))
+        sal_card = card(self, title="Salaries Paid")
+        sal_card.pack(padx=40, pady=2, fill="x")
 
         g.deal_salaries()
         for p in g.players:
             row = tk.Frame(sal_card, bg=BG_CARD)
             row.pack(fill="x", pady=1)
-            gs_mk = " ★" if p.is_gs else ""
+            gs_mk = " [GS]" if p.is_gs else ""
             lbl(row, f"{p.name}{gs_mk}  ({p.sector})", fg=TEXT, bg=BG_CARD, anchor="w").pack(side="left")
-            lbl(row, f"+${p.salary}  (salary {p.mult_label})", fg=GOLD, bg=BG_CARD, anchor="e").pack(side="right")
+            lbl(row, f"+${p.salary}  ({p.mult_label})", fg=GREEN, bg=BG_CARD, anchor="e").pack(side="right")
 
-        sep(self).pack(fill="x", padx=50, pady=10)
+        sep(self).pack(fill="x", padx=40, pady=8)
 
         # GS dice roll
         gs = g.gs
-        lbl(self, f"🎲  {gs.name} (General Secretary) rolls for first player", font=F_SUB, fg=TEXT).pack(pady=(0, 4))
+        lbl(self, f"{gs.name} (General Secretary) rolls for first player", font=F_SUB, fg=TEXT).pack(pady=(0, 3))
         self.dice_lbl = lbl(self, "Press the button below to roll.", fg=TEXT_DIM)
-        self.dice_lbl.pack(pady=4)
+        self.dice_lbl.pack(pady=3)
 
-        self.roll_btn = btn(self, "🎲   Roll the Dice", self._roll, color=RED, width=22)
-        self.roll_btn.pack(pady=8)
+        self.roll_btn = btn(self, "Roll the Dice", self._roll, color=BG, width=20)
+        self.roll_btn.pack(pady=6)
 
-        self.go_btn = btn(self, "▶   Begin Player Turns", self.master.show_player_turn, color=GREEN, width=24)
+        self.go_btn = btn(self, "Begin Player Turns", self.master.show_player_turn, color=BG, fg=GREEN, width=22)
 
     def _roll(self):
         g   = self.game
@@ -488,15 +719,16 @@ class TurnStartScreen(tk.Frame):
 class PrivacyScreen(tk.Frame):
     def __init__(self, master: App, player: Player, on_continue, **_):
         super().__init__(master, bg=BG)
-        lbl(self, "☭  AZROK'S REPUBLIC  ☭", font=F_TITLE, fg=GOLD).pack(pady=(80, 8))
-        sep(self).pack(fill="x", padx=50, pady=12)
-        lbl(self, "Pass the device to:", fg=TEXT_DIM).pack(pady=(20, 4))
-        lbl(self, player.name, font=F_HEAD, fg=GOLD).pack()
-        lbl(self, f"{player.sector} Delegate", fg=TEXT_DIM).pack(pady=3)
+        titlebar(self, "Azrok's Republic - Pass Device").pack(fill="x")
+        lbl(self, "AZROK'S REPUBLIC", font=F_TITLE, fg=W95_BLUE).pack(pady=(50, 6))
+        sep(self).pack(fill="x", padx=40, pady=10)
+        lbl(self, "Pass the device to:", fg=TEXT_DIM).pack(pady=(16, 3))
+        lbl(self, player.name, font=F_HEAD, fg=W95_BLUE).pack()
+        lbl(self, f"{player.sector} Delegate", fg=TEXT_DIM).pack(pady=2)
         if player.is_gs:
-            lbl(self, "★  General Secretary  ★", fg=GOLD).pack()
-        sep(self).pack(fill="x", padx=50, pady=20)
-        btn(self, f"▶   I'm {player.name} — Continue", on_continue, color=RED, width=34).pack(pady=16)
+            lbl(self, "[ General Secretary ]", fg=GOLD).pack()
+        sep(self).pack(fill="x", padx=40, pady=16)
+        btn(self, f"I'm {player.name} - Continue", on_continue, color=BG, fg=W95_BLUE, width=32).pack(pady=14)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -517,18 +749,23 @@ class PlayerTurnScreen(tk.Frame):
         p = self.player
         g = self.game
 
-        # ── Top bar ──
-        top = tk.Frame(self, bg=BG_MED, padx=14, pady=8)
+        # ── Title bar ──
+        titlebar(self, f"Azrok's Republic - {p.name}'s Turn").pack(fill="x")
+
+        # ── Top info bar ──
+        top = tk.Frame(self, bg=BG, padx=10, pady=4, relief="flat")
         top.pack(fill="x")
-        lbl(top, f"⚑  {p.name}'s Turn", font=F_HEAD, fg=GOLD, bg=BG_MED).pack(side="left")
-        gs_mk = "  ★ GS" if p.is_gs else ""
-        lbl(top, f"Turn {g.turn}/{MAX_TURNS}{gs_mk}", fg=TEXT_DIM, bg=BG_MED).pack(side="right")
+        gs_mk = "  [GS]" if p.is_gs else ""
+        lbl(top, f"{p.name}'s Turn{gs_mk}", font=F_HEAD, fg=W95_BLUE, bg=BG).pack(side="left")
+        lbl(top, f"Turn {g.turn}/{MAX_TURNS}", fg=TEXT_DIM, bg=BG).pack(side="right")
+
+        sep(self).pack(fill="x", padx=0, pady=2)
 
         # ── Two-column body ──
         body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=10, pady=6)
+        body.pack(fill="both", expand=True, padx=8, pady=4)
 
-        left  = tk.Frame(body, bg=BG, width=280)
+        left  = tk.Frame(body, bg=BG, width=240)
         left.pack(side="left", fill="y", padx=(0, 6))
         left.pack_propagate(False)
 
@@ -539,74 +776,73 @@ class PlayerTurnScreen(tk.Frame):
         self._build_actions(right)
 
         # ── End turn button ──
-        sep(self).pack(fill="x", padx=10, pady=4)
-        btn(self, "✔   End My Turn", self._end_turn, color=BG_MED, width=26).pack(pady=8)
+        sep(self).pack(fill="x", padx=0, pady=2)
+        btn(self, "End My Turn", self._end_turn, color=BG, width=22).pack(pady=6)
 
     def _build_status(self, parent):
         p = self.player
         g = self.game
 
         # Money card
-        mc = card(parent)
-        mc.pack(fill="x", pady=4)
-        lbl(mc, "YOUR WALLET", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
-        self.money_lbl = lbl(mc, f"${p.money}", font=("Georgia", 28, "bold"), fg=GOLD, bg=BG_CARD)
+        mc = card(parent, title="Your Wallet")
+        mc.pack(fill="x", pady=3)
+        self.money_lbl = lbl(mc, f"${p.money}", font=("MS Sans Serif", 20, "bold"), fg=W95_BLUE, bg=BG_CARD)
         self.money_lbl.pack()
         self.salary_lbl = lbl(mc, f"Salary: ${p.salary}/turn  ({p.mult_label})", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD)
         self.salary_lbl.pack()
         lbl(mc, f"Sector: {p.sector}", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
 
         # People's pot card
-        pc = card(parent)
-        pc.pack(fill="x", pady=4)
-        lbl(pc, "PEOPLE'S POT", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
-        self.pot_lbl = lbl(pc, f"${g.people_pot}", font=("Georgia", 22, "bold"), fg=GREEN_LT, bg=BG_CARD)
+        pc = card(parent, title="People's Pot")
+        pc.pack(fill="x", pady=3)
+        self.pot_lbl = lbl(pc, f"${g.people_pot}", font=("MS Sans Serif", 16, "bold"), fg=GREEN, bg=BG_CARD)
         self.pot_lbl.pack()
         cost = war_cost(g.turn, len(g.players))
         lbl(pc, f"War fund needed: ${cost}", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
 
         # All players summary
-        sc = card(parent)
-        sc.pack(fill="x", pady=4)
-        lbl(sc, "ALL DELEGATES", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
-        sep(sc, BG_MED).pack(fill="x", pady=3)
+        sc = card(parent, title="All Delegates")
+        sc.pack(fill="x", pady=3)
         for q in g.players:
             row = tk.Frame(sc, bg=BG_CARD)
             row.pack(fill="x")
-            gs = " ★" if q.is_gs else "   "
-            nc = GOLD if q is p else TEXT
-            lbl(row, f"{gs}{q.name}", font=F_SMALL, fg=nc, bg=BG_CARD, anchor="w").pack(side="left")
+            gs = " [GS]" if q.is_gs else "      "
+            nc = W95_BLUE if q is p else TEXT
+            lbl(row, f"{q.name}{gs}", font=F_SMALL, fg=nc, bg=BG_CARD, anchor="w").pack(side="left")
             lbl(row, f"${q.money}  {q.mult_label}", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, anchor="e").pack(side="right")
 
         # War tracker
-        wc = card(parent)
-        wc.pack(fill="x", pady=4)
+        wc = card(parent, title="War Track")
+        wc.pack(fill="x", pady=3)
         dc = RED if g.drow_victories > 0 else TEXT_DIM
-        lbl(wc, f"⚔️  Drow: {g.drow_victories}/{MAX_DROW}", font=F_SMALL, fg=dc, bg=BG_CARD).pack()
+        lbl(wc, f"Drow: {g.drow_victories}/{MAX_DROW}", font=F_SMALL, fg=dc, bg=BG_CARD).pack()
         filled = g.turn - 1
-        track  = "█" * filled + "░" * (MAX_TURNS - filled)
-        lbl(wc, f"[{track}]", font=F_MONO, fg=TEXT_DIM, bg=BG_CARD).pack()
+        track  = "[" + "#" * filled + "." * (MAX_TURNS - filled) + "]"
+        lbl(wc, track, font=F_MONO, fg=TEXT_DIM, bg=BG_CARD).pack()
 
     def _build_actions(self, parent):
         style = ttk.Style()
-        style.theme_use("default")
-        style.configure("TNotebook",       background=BG,     borderwidth=0)
-        style.configure("TNotebook.Tab",   background=BG_MED, foreground=TEXT,
-                        padding=[12, 6],   font=F_BTN)
+        try:
+            style.theme_use("winnative")
+        except Exception:
+            style.theme_use("default")
+        style.configure("TNotebook",     background=BG,      borderwidth=2)
+        style.configure("TNotebook.Tab", background=BG_MED,  foreground=TEXT,
+                        padding=[10, 4], font=F_BTN)
         style.map("TNotebook.Tab",
-                  background=[("selected", BG_CARD)],
-                  foreground=[("selected", GOLD)])
+                  background=[("selected", BG)],
+                  foreground=[("selected", W95_BLUE)])
 
         nb = ttk.Notebook(parent)
         nb.pack(fill="both", expand=True)
 
-        tab_people  = tk.Frame(nb, bg=BG_CARD, padx=16, pady=12)
-        tab_special = tk.Frame(nb, bg=BG_CARD, padx=16, pady=12)
-        tab_tax     = tk.Frame(nb, bg=BG_CARD, padx=16, pady=12)
+        tab_people  = tk.Frame(nb, bg=BG_CARD, padx=12, pady=10, relief="sunken", bd=2)
+        tab_special = tk.Frame(nb, bg=BG_CARD, padx=12, pady=10, relief="sunken", bd=2)
+        tab_tax     = tk.Frame(nb, bg=BG_CARD, padx=12, pady=10, relief="sunken", bd=2)
 
-        nb.add(tab_people,  text="📥  People's Pot")
-        nb.add(tab_special, text="🔧  Special Interests")
-        nb.add(tab_tax,     text="💸  Tax")
+        nb.add(tab_people,  text="People's Pot")
+        nb.add(tab_special, text="Special Interests")
+        nb.add(tab_tax,     text="Tax")
 
         self._tab_people(tab_people)
         self._tab_special(tab_special)
@@ -615,28 +851,28 @@ class PlayerTurnScreen(tk.Frame):
     # ── Tab: People's Pot ─────────────────────────────────────────────────────
 
     def _tab_people(self, parent):
-        lbl(parent, "Invest in the People's Pot", font=F_SUB, fg=GOLD, bg=BG_CARD).pack(pady=(4, 4))
+        lbl(parent, "Invest in the People's Pot", font=F_SUB, fg=W95_BLUE, bg=BG_CARD).pack(pady=(4, 4))
         lbl(parent,
             "Your contribution goes into the shared pot.\n"
             "After all players act, the pot is multiplied by the Fruits of Labor card\n"
             "and split equally among ALL players — even those who contributed nothing.",
-            fg=TEXT_DIM, bg=BG_CARD).pack(pady=(0, 10))
+            fg=TEXT_DIM, bg=BG_CARD).pack(pady=(0, 8))
 
         row = tk.Frame(parent, bg=BG_CARD)
-        row.pack(pady=6)
+        row.pack(pady=4)
         lbl(row, "Amount to invest: $", bg=BG_CARD).pack(side="left")
         self.invest_var = tk.StringVar(value="0")
         tk.Entry(row, textvariable=self.invest_var, font=F_BODY,
-                 bg=BG_MED, fg=TEXT, insertbackground=TEXT,
-                 relief="flat", width=8).pack(side="left", padx=6)
+                 bg=W95_WHITE, fg=TEXT, insertbackground=TEXT,
+                 relief="sunken", bd=2, width=8).pack(side="left", padx=4)
 
-        btn(parent, "📥   Invest in People", self._invest_people,
-            color=GREEN, width=28).pack(pady=8)
+        btn(parent, "Invest in People's Pot", self._invest_people,
+            color=BG, fg=GREEN, width=26).pack(pady=6)
 
         lbl(parent,
-            "💡  Tip: You can invest $0 and free-ride on others' contributions.\n"
+            "Tip: You can invest $0 and free-ride on others' contributions.\n"
             "But if nobody invests, the war fund may not be met!",
-            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack(pady=(10, 0))
+            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack(pady=(8, 0))
 
     def _invest_people(self):
         try:
@@ -669,44 +905,40 @@ class PlayerTurnScreen(tk.Frame):
         p = self.player
 
         # ── Improve ──
-        imp_c = card(parent)
-        imp_c.pack(fill="x", pady=6)
-        lbl(imp_c, f"🔧  Labor Improvement  (${IMPROVEMENT_COST})", font=F_SUB, fg=GOLD, bg=BG_CARD).pack(anchor="w")
-        next_mult = f"{p.improvement + 2}×" if p.improvement < MAX_IMPROVEMENT else "MAX"
-        lbl(imp_c, f"Upgrade salary multiplier: {p.mult_label} → {next_mult}\n"
+        imp_c = card(parent, title=f"Labor Improvement  (${IMPROVEMENT_COST})")
+        imp_c.pack(fill="x", pady=4)
+        next_mult = f"{p.improvement + 2}x" if p.improvement < MAX_IMPROVEMENT else "MAX"
+        lbl(imp_c, f"Upgrade salary multiplier: {p.mult_label} -> {next_mult}\n"
                    f"Improved salary will be ${BASE_SALARY * (p.improvement + 2)}/turn.",
-            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=3)
-        imp_color = GOLD if p.can_improve() else BG_MED
-        btn(imp_c, f"🔧   Improve Tools (${IMPROVEMENT_COST})",
-            self._improve, color=imp_color, width=30).pack(pady=4)
+            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=2)
+        imp_fg = TEXT if p.can_improve() else TEXT_DIM
+        btn(imp_c, f"Improve Tools (${IMPROVEMENT_COST})",
+            self._improve, color=BG, fg=imp_fg, width=28).pack(pady=3)
         if p.improvement >= MAX_IMPROVEMENT:
             lbl(imp_c, "Already at maximum improvement.", font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
 
-        sep(parent, BG_MED).pack(fill="x", pady=8)
+        sep(parent, BG_MED).pack(fill="x", pady=6)
 
         # ── Powder Charge ──
-        pw_c = card(parent)
-        pw_c.pack(fill="x", pady=6)
-        lbl(pw_c, f"💣  Powder Charge  (${POWDER_COST})", font=F_SUB, fg=DROW_CLR, bg=BG_CARD).pack(anchor="w")
+        pw_c = card(parent, title=f"Powder Charge  (${POWDER_COST})")
+        pw_c.pack(fill="x", pady=4)
         lbl(pw_c, "Blow a hole in the undermountain walls.\nThe Drow gain ONE victory on the war track.",
-            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=3)
-        pw_color = DROW_CLR if p.can_buy_powder() else BG_MED
-        btn(pw_c, f"💣   Buy Powder Charge (${POWDER_COST})",
-            self._powder, color=pw_color, width=30).pack(pady=4)
+            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=2)
+        pw_fg = RED if p.can_buy_powder() else TEXT_DIM
+        btn(pw_c, f"Buy Powder Charge (${POWDER_COST})",
+            self._powder, color=BG, fg=pw_fg, width=28).pack(pady=3)
 
-        sep(parent, BG_MED).pack(fill="x", pady=8)
+        sep(parent, BG_MED).pack(fill="x", pady=6)
 
         # ── Azrok's Dagger ──
-        dg_c = card(parent)
-        dg_c.pack(fill="x", pady=6)
-        lbl(dg_c, f"🗡️  Azrok's Dagger  (${DAGGER_COST})", font=F_SUB, fg=GOLD, bg=BG_CARD).pack(anchor="w")
+        dg_c = card(parent, title=f"Azrok's Dagger  (${DAGGER_COST})")
+        dg_c.pack(fill="x", pady=4)
         lbl(dg_c, "Bribe the Duergars to return Azrok's Dagger.\n"
                   "Azrok regains his sight and guides the Republic to IMMEDIATE VICTORY!",
-            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=3)
-        dg_color = GOLD if p.can_buy_dagger() else BG_MED
-        btn(dg_c, f"🗡️   Buy Azrok's Dagger (${DAGGER_COST})",
-            self._dagger, color=dg_color, fg=BG if p.can_buy_dagger() else TEXT_DIM,
-            width=30).pack(pady=4)
+            font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD, justify="left", anchor="w").pack(anchor="w", pady=2)
+        dg_fg = GREEN if p.can_buy_dagger() else TEXT_DIM
+        btn(dg_c, f"Buy Azrok's Dagger (${DAGGER_COST})",
+            self._dagger, color=BG, fg=dg_fg, width=28).pack(pady=3)
 
     def _improve(self):
         p = self.player
@@ -776,15 +1008,15 @@ class PlayerTurnScreen(tk.Frame):
     def _tab_tax(self, parent):
         p = self.player
 
-        lbl(parent, f"💸  Tax  (${TAX_COST})", font=F_SUB, fg=GOLD, bg=BG_CARD).pack(pady=(4, 4))
+        lbl(parent, f"Tax  (${TAX_COST})", font=F_SUB, fg=W95_BLUE, bg=BG_CARD).pack(pady=(4, 4))
         lbl(parent,
             f"Spend ${TAX_COST} to immediately remove ${TAX_AMOUNT} from another player.\n"
             "The taxed money is DISCARDED — not given to you.\n"
             "Can only be done ONCE per turn.",
-            fg=TEXT_DIM, bg=BG_CARD).pack(pady=(0, 10))
+            fg=TEXT_DIM, bg=BG_CARD).pack(pady=(0, 8))
 
         if p.used_tax:
-            lbl(parent, "✔  Tax already used this turn.", fg=TEXT_DIM, bg=BG_CARD).pack(pady=10)
+            lbl(parent, "[Tax already used this turn.]", fg=TEXT_DIM, bg=BG_CARD).pack(pady=8)
             return
 
         targets = [q.name for q in self.game.players if q is not p]
@@ -793,23 +1025,24 @@ class PlayerTurnScreen(tk.Frame):
             return
 
         row = tk.Frame(parent, bg=BG_CARD)
-        row.pack(pady=8)
-        lbl(row, "Tax target:", bg=BG_CARD).pack(side="left", padx=(0, 8))
+        row.pack(pady=6)
+        lbl(row, "Tax target:", bg=BG_CARD).pack(side="left", padx=(0, 6))
         self.tax_var = tk.StringVar(value=targets[0])
 
         menu = tk.OptionMenu(row, self.tax_var, *targets)
-        menu.config(font=F_BODY, bg=BG_MED, fg=TEXT, activebackground=BG_CARD,
-                    activeforeground=GOLD, relief="flat", padx=6)
-        menu["menu"].config(font=F_BODY, bg=BG_MED, fg=TEXT)
+        menu.config(font=F_BODY, bg=BG, fg=TEXT, activebackground=W95_BLUE,
+                    activeforeground=W95_WHITE, relief="raised", bd=2, padx=4)
+        menu["menu"].config(font=F_BODY, bg=W95_WHITE, fg=TEXT,
+                            activebackground=W95_BLUE, activeforeground=W95_WHITE)
         menu.pack(side="left")
 
-        tax_color = RED if p.can_tax() else BG_MED
-        btn(parent, f"💸   Apply Tax (${TAX_COST})", self._tax,
-            color=tax_color, width=28).pack(pady=8)
+        tax_fg = RED if p.can_tax() else TEXT_DIM
+        btn(parent, f"Apply Tax (${TAX_COST})", self._tax,
+            color=BG, fg=tax_fg, width=26).pack(pady=6)
 
         if p.money < TAX_COST:
             lbl(parent, f"Not enough money (need ${TAX_COST}).",
-                font=F_SMALL, fg=TEXT_DIM, bg=BG_CARD).pack()
+                font=F_SMALL, fg=RED, bg=BG_CARD).pack()
 
     def _tax(self):
         p = self.player
@@ -863,22 +1096,23 @@ class EndOfTurnScreen(tk.Frame):
 
     def _build(self, lines):
         g = self.master.game
-        lbl(self, "⚖️   End of Turn Resolution", font=F_HEAD, fg=GOLD).pack(pady=(30, 6))
-        sep(self).pack(fill="x", padx=50, pady=8)
+        titlebar(self, "Azrok's Republic - End of Turn").pack(fill="x")
+        lbl(self, "End of Turn Resolution", font=F_HEAD, fg=W95_BLUE).pack(pady=(18, 4))
+        sep(self).pack(fill="x", padx=40, pady=6)
 
-        report = card(self)
-        report.pack(fill="x", padx=50, pady=6)
+        report = card(self, title="Results")
+        report.pack(fill="x", padx=40, pady=4)
         for text, tag in lines:
             fg = self.TAG_COLORS.get(tag, TEXT)
             lbl(report, text, fg=fg, bg=BG_CARD, anchor="w", justify="left").pack(fill="x", pady=1)
 
-        sep(self).pack(fill="x", padx=50, pady=12)
+        sep(self).pack(fill="x", padx=40, pady=10)
 
         if g.game_over:
-            lbl(self, "The game has ended!", font=F_SUB, fg=GOLD).pack(pady=6)
-            btn(self, "🏁   See Final Results", self.master.show_game_over, color=RED, width=26).pack(pady=8)
+            lbl(self, "The game has ended!", font=F_SUB, fg=TEXT).pack(pady=4)
+            btn(self, "See Final Results", self.master.show_game_over, color=BG, fg=W95_BLUE, width=24).pack(pady=6)
         else:
-            btn(self, "▶   Begin Next Turn", self.master.next_turn, color=GREEN, width=26).pack(pady=8)
+            btn(self, "Begin Next Turn", self.master.next_turn, color=BG, fg=GREEN, width=24).pack(pady=6)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -892,59 +1126,111 @@ class GameOverScreen(tk.Frame):
     def _build(self):
         g = self.master.game
 
-        lbl(self, "☭  GAME OVER  ☭", font=F_TITLE, fg=GOLD).pack(pady=(35, 6))
-        sep(self).pack(fill="x", padx=50, pady=8)
+        titlebar(self, "Azrok's Republic - Game Over").pack(fill="x")
+        lbl(self, "GAME OVER", font=F_TITLE, fg=W95_BLUE).pack(pady=(22, 4))
+        sep(self).pack(fill="x", padx=40, pady=6)
 
         if g.republic_won:
-            result_text = "🏆  THE REPUBLIC HAS SURVIVED!"
+            result_text = "THE REPUBLIC HAS SURVIVED!"
             sub_text    = "Brothers of the Republic WIN!"
-            result_fg   = GREEN_LT
+            result_fg   = GREEN
         else:
-            result_text = "💀  THE DROW HAVE OVERCOME THE REPUBLIC!"
+            result_text = "THE DROW HAVE OVERCOME THE REPUBLIC!"
             sub_text    = "Agents of the Drow WIN!"
             result_fg   = RED
 
-        lbl(self, result_text, font=F_HEAD, fg=result_fg).pack(pady=6)
+        lbl(self, result_text, font=F_HEAD, fg=result_fg).pack(pady=4)
         lbl(self, sub_text,    font=F_SUB,  fg=result_fg).pack()
 
-        sep(self).pack(fill="x", padx=50, pady=12)
+        sep(self).pack(fill="x", padx=40, pady=10)
 
         # Role reveal
-        lbl(self, "Secret Role Reveal", font=F_SUB, fg=GOLD).pack(pady=(0, 6))
-        rc = card(self)
-        rc.pack(padx=50, pady=4, fill="x")
+        lbl(self, "Secret Role Reveal", font=F_SUB, fg=TEXT).pack(pady=(0, 4))
+        rc = card(self, title="Roles")
+        rc.pack(padx=40, pady=3, fill="x")
         for p in g.players:
-            row = tk.Frame(rc, bg=BG_CARD, pady=3)
+            row = tk.Frame(rc, bg=BG_CARD, pady=2)
             row.pack(fill="x")
-            gs_mk      = "  ★ GS" if p.is_gs else ""
-            role_fg    = DROW_CLR if "Drow" in p.role else GREEN_LT
+            gs_mk      = "  [GS]" if p.is_gs else ""
+            role_fg    = DROW_CLR if "Drow" in p.role else GREEN
             is_winner  = ((g.republic_won and "Brother" in p.role)
                           or (not g.republic_won and "Drow" in p.role))
-            win_mk     = "  🏆" if is_winner else ""
+            win_mk     = "  [WINNER]" if is_winner else ""
             lbl(row, f"{p.name}{gs_mk}  ({p.sector})", fg=TEXT, bg=BG_CARD, anchor="w").pack(side="left")
             lbl(row, f"{p.role}{win_mk}", fg=role_fg, bg=BG_CARD, anchor="e").pack(side="right")
 
-        sep(self).pack(fill="x", padx=50, pady=10)
+        sep(self).pack(fill="x", padx=40, pady=8)
 
         # Final wealth
-        lbl(self, "Final Wealth (richest first)", font=F_SUB, fg=GOLD).pack(pady=(0, 6))
-        wc = card(self)
-        wc.pack(padx=50, pady=4, fill="x")
+        lbl(self, "Final Wealth (richest first)", font=F_SUB, fg=TEXT).pack(pady=(0, 4))
+        wc = card(self, title="Wealth")
+        wc.pack(padx=40, pady=3, fill="x")
         for p in sorted(g.players, key=lambda q: q.money, reverse=True):
-            row = tk.Frame(wc, bg=BG_CARD, pady=2)
+            row = tk.Frame(wc, bg=BG_CARD, pady=1)
             row.pack(fill="x")
-            lbl(row, p.name,      fg=TEXT, bg=BG_CARD, anchor="w").pack(side="left")
-            lbl(row, f"${p.money}", fg=GOLD, bg=BG_CARD, anchor="e").pack(side="right")
+            lbl(row, p.name,        fg=TEXT, bg=BG_CARD, anchor="w").pack(side="left")
+            lbl(row, f"${p.money}", fg=W95_BLUE, bg=BG_CARD, anchor="e").pack(side="right")
 
-        sep(self).pack(fill="x", padx=50, pady=12)
-        btn(self, "🔄   Play Again", self.master._goto,
-            color=RED, width=22).pack(pady=6)
+        sep(self).pack(fill="x", padx=40, pady=10)
+        btn(self, "Play Again", self.master._goto,
+            color=BG, fg=W95_BLUE, width=20).pack(pady=4)
 
         # Wire play-again correctly
-        # Rebind to pass SetupScreen
         for w in self.winfo_children():
             if isinstance(w, tk.Button) and "Play Again" in w.cget("text"):
                 w.config(command=lambda: self.master._goto(SetupScreen))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AITurnScreen(tk.Frame):
+    """Displays what an AI player decided to do, then lets humans continue."""
+
+    TAG_COLORS = {"ok": GREEN_LT, "bad": RED, "gold": GOLD, "dim": TEXT_DIM, "normal": TEXT}
+
+    def __init__(self, master: App, player: AIPlayer, log: list, game_ended: bool, **_):
+        super().__init__(master, bg=BG)
+        self.master = master
+        self._build(player, log, game_ended)
+
+    def _build(self, player, log, game_ended):
+        g = self.master.game
+        titlebar(self, f"Azrok's Republic - {player.name}'s Turn [AI]").pack(fill="x")
+
+        top = tk.Frame(self, bg=BG, padx=10, pady=4)
+        top.pack(fill="x")
+        gs_mk = "  [GS]" if player.is_gs else ""
+        lbl(top, f"{player.name}{gs_mk}  \u2014  {player.ai_type}",
+            font=F_HEAD, fg=W95_BLUE, bg=BG).pack(side="left")
+        lbl(top, f"Turn {g.turn}/{MAX_TURNS}", fg=TEXT_DIM, bg=BG).pack(side="right")
+
+        sep(self).pack(fill="x", pady=2)
+
+        # Status strip: wallet + pot
+        info = tk.Frame(self, bg=BG, padx=10, pady=2)
+        info.pack(fill="x")
+        lbl(info, f"Wallet: ${player.money}", font=F_SMALL, fg=TEXT_DIM, bg=BG).pack(side="left", padx=(0, 16))
+        lbl(info, f"People's Pot: ${g.people_pot}", font=F_SMALL, fg=TEXT_DIM, bg=BG).pack(side="left")
+
+        # Action log
+        log_frame = card(self, title="AI Actions This Turn")
+        log_frame.pack(fill="x", padx=20, pady=8)
+        for text, tag in log:
+            fg = self.TAG_COLORS.get(tag, TEXT)
+            lbl(log_frame, text, fg=fg, bg=BG_CARD, anchor="w", justify="left").pack(fill="x", pady=1)
+
+        sep(self).pack(fill="x", pady=6)
+
+        if game_ended:
+            lbl(self, "The game has ended!", font=F_SUB, fg=TEXT).pack(pady=4)
+            btn(self, "See Final Results", self.master.show_game_over,
+                color=BG, fg=W95_BLUE, width=24).pack(pady=6)
+        else:
+            btn(self, "Continue", self._continue, color=BG, fg=GREEN, width=20).pack(pady=8)
+
+    def _continue(self):
+        self.master.game.advance()
+        self.master.show_player_turn()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
