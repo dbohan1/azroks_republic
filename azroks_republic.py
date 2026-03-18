@@ -43,10 +43,13 @@ def war_cost(turn: int, num_players: int) -> int:
 
 # AI personality roster  {name: short description}
 AI_TYPES = {
-    "The Idealist": "Invests heavily for the common good. Loyal to the Republic.",
-    "The Miser":    "Hoards every coin and improves tools. Contributes nothing to the pot.",
-    "The Wrecker":  "Sabotages if it serves the Drow. Dangerous and unpredictable.",
-    "The Schemer":  "Uses tax to weaken rivals. Cold, calculating, self-serving.",
+    "The Idealist":     "Invests heavily for the common good. Loyal to the Republic.",
+    "The Philanthropist": "Donates nearly everything to the pot every turn. Selflessly generous.",
+    "The Pragmatist":   "Calculates the war-fund gap and contributes exactly their fair share.",
+    "The Economist":    "Upgrades tools aggressively for compound salary gains, then invests surplus.",
+    "The Miser":        "Hoards every coin and improves tools. Contributes nothing to the pot.",
+    "The Wrecker":      "Sabotages if it serves the Drow. Dangerous and unpredictable.",
+    "The Schemer":      "Uses tax to weaken rivals. Cold, calculating, self-serving.",
 }
 
 
@@ -162,6 +165,12 @@ class AIPlayer(Player):
 
         if self.ai_type == "The Idealist":
             self._act_idealist(game, log)
+        elif self.ai_type == "The Philanthropist":
+            self._act_philanthropist(game, log)
+        elif self.ai_type == "The Pragmatist":
+            self._act_pragmatist(game, log)
+        elif self.ai_type == "The Economist":
+            self._act_economist(game, log)
         elif self.ai_type == "The Miser":
             self._act_miser(game, log)
         elif self.ai_type == "The Wrecker":
@@ -243,6 +252,37 @@ class AIPlayer(Player):
         if self.improvement < 2:
             self._do_improve(game, log)
 
+    def _act_philanthropist(self, game, log):
+        """Donates almost everything every turn. Never taxes or self-improves."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        # Keep just $1 — give everything else away
+        self._do_invest(game, log, max(0, self.money - 1))
+
+    def _act_pragmatist(self, game, log):
+        """Contributes exactly their fair share of the war fund gap, no more."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        n    = len(game.players)
+        cost = war_cost(game.turn, n)
+        gap  = max(0, cost - game.people_pot)
+        # Fair share = ceiling of gap / number of players still to act
+        # Approximate: contribute gap / n, rounded up, capped to wallet
+        fair_share = -(-gap // n)   # ceiling division
+        self._do_invest(game, log, min(fair_share, self.money))
+        # Upgrade tools if there's money left over
+        self._do_improve(game, log)
+
+    def _act_economist(self, game, log):
+        """Upgrades tools to max first; invests all surplus into the pot."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        # Keep improving tools as long as affordable — salary compounds each turn
+        while self._do_improve(game, log):
+            pass
+        # Invest whatever remains (keep $2 buffer)
+        self._do_invest(game, log, max(0, self.money - 2))
+
     def _act_miser(self, game, log):
         """Hoards money. Improves tools first, then taxes, invests nothing."""
         if self._do_dagger(game, log):
@@ -284,6 +324,29 @@ class AIPlayer(Player):
             self._do_improve(game, log)
 
 
+class GameLog:
+    """Persistent record of every turn's events and wealth snapshots."""
+
+    def __init__(self):
+        self.turns = []   # list of {'turn': int, 'wealth': dict, 'events': list}
+
+    def begin_turn(self, turn: int, players: list):
+        """Start a new turn record. Snapshot wealth AFTER salaries are paid."""
+        self.turns.append({
+            "turn":   turn,
+            "wealth": {p.name: p.money for p in players},
+            "events": [],
+        })
+
+    def add(self, text: str, tag: str = "normal"):
+        if self.turns:
+            self.turns[-1]["events"].append((text, tag))
+
+    def add_many(self, lines: list):
+        for text, tag in lines:
+            self.add(text, tag)
+
+
 class GameState:
     def __init__(self, players: list):
         self.players        = players
@@ -296,6 +359,7 @@ class GameState:
         random.shuffle(self.fruits_deck)
         self.game_over      = False
         self.republic_won   = None   # True / False / None
+        self.log            = GameLog()
 
     @property
     def current_player(self):
@@ -347,6 +411,7 @@ class GameState:
             if self.drow_victories >= MAX_DROW:
                 self.game_over    = True
                 self.republic_won = False
+                self.log.add_many(lines)
                 return lines
 
         # 2. Fruits of Labor card
@@ -376,11 +441,13 @@ class GameState:
         if self.turn > MAX_TURNS:
             self.game_over    = True
             self.republic_won = True
+            self.log.add_many(lines)
             return lines
 
         for p in self.players:
             p.used_tax = False
 
+        self.log.add_many(lines)
         return lines
 
 
@@ -453,6 +520,7 @@ class App(tk.Tk):
             p = self.game.current_player
             if p.is_ai:
                 log, ended = p.decide(self.game)
+                self.game.log.add_many(log)
                 self._goto(AITurnScreen, player=p, log=log, game_ended=ended)
             else:
                 self._goto(PrivacyScreen, player=p,
@@ -675,6 +743,7 @@ class TurnStartScreen(tk.Frame):
         sal_card.pack(padx=40, pady=2, fill="x")
 
         g.deal_salaries()
+        g.log.begin_turn(g.turn, g.players)
         for p in g.players:
             row = tk.Frame(sal_card, bg=BG_CARD)
             row.pack(fill="x", pady=1)
@@ -895,6 +964,8 @@ class PlayerTurnScreen(tk.Frame):
         self.game.people_pot += amount
         self.invest_var.set("0")
         self._refresh()
+        self.game.log.add(f"{self.player.name} invested ${amount} in the People's Pot "
+                          f"(pot now ${self.game.people_pot}).", "ok")
         messagebox.showinfo("Invested!",
                             f"You invested ${amount}.\nPeople's pot is now ${self.game.people_pot}.",
                             parent=self)
@@ -956,6 +1027,8 @@ class PlayerTurnScreen(tk.Frame):
         p.money       -= IMPROVEMENT_COST
         p.improvement += 1
         self._refresh()
+        self.game.log.add(f"{p.name} improved tools to {p.mult_label}. "
+                          f"Next salary: ${p.salary}/turn.", "ok")
         messagebox.showinfo("Improved!", f"New salary multiplier: {p.mult_label}\n"
                                          f"Next salary: ${p.salary}/turn", parent=self)
 
@@ -974,6 +1047,8 @@ class PlayerTurnScreen(tk.Frame):
         p.money              -= POWDER_COST
         self.game.drow_victories += 1
         self._refresh()
+        self.game.log.add(f"{p.name} bought a Powder Charge! "
+                          f"Drow victories: {self.game.drow_victories}/{MAX_DROW}.", "bad")
         if self.game.drow_victories >= MAX_DROW:
             self.game.game_over    = True
             self.game.republic_won = False
@@ -1001,6 +1076,7 @@ class PlayerTurnScreen(tk.Frame):
         p.money            -= DAGGER_COST
         self.game.game_over    = True
         self.game.republic_won = True
+        self.game.log.add(f"{p.name} bought Azrok's Dagger! The Republic wins IMMEDIATELY!", "ok")
         self.master.show_game_over()
 
     # ── Tab: Tax ──────────────────────────────────────────────────────────────
@@ -1067,6 +1143,8 @@ class PlayerTurnScreen(tk.Frame):
         target.money -= removed
         p.used_tax   = True
         self._refresh()
+        self.game.log.add(f"{p.name} taxed {target.name} — removed ${removed}. "
+                          f"(Money discarded.)", "dim")
         messagebox.showinfo("Tax Applied",
                             f"{target.name} lost ${removed}. Money discarded.", parent=self)
 
@@ -1172,6 +1250,8 @@ class GameOverScreen(tk.Frame):
             lbl(row, f"${p.money}", fg=W95_BLUE, bg=BG_CARD, anchor="e").pack(side="right")
 
         sep(self).pack(fill="x", padx=40, pady=10)
+        btn(self, "View Game Log", lambda: self.master._goto(GameLogScreen),
+            color=BG, fg=W95_BLUE, width=20).pack(pady=4)
         btn(self, "Play Again", self.master._goto,
             color=BG, fg=W95_BLUE, width=20).pack(pady=4)
 
@@ -1231,6 +1311,184 @@ class AITurnScreen(tk.Frame):
     def _continue(self):
         self.master.game.advance()
         self.master.show_player_turn()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GameLogScreen(tk.Frame):
+    """End-game log: wealth chart + full transcript."""
+
+    # One distinct Win95-palette colour per player slot
+    PLOT_COLORS = [
+        "#000080", "#800000", "#006400", "#800080",
+        "#7B6800", "#006464", "#404040", "#C00000",
+    ]
+    TAG_FG = {"ok": GREEN_LT, "bad": RED, "gold": GOLD, "dim": TEXT_DIM, "normal": TEXT}
+
+    def __init__(self, master: App, **_):
+        super().__init__(master, bg=BG)
+        self.master = master
+        self._build()
+
+    def _build(self):
+        g = self.master.game
+        titlebar(self, "Azrok's Republic - Game Log").pack(fill="x")
+        lbl(self, "Game Log", font=F_HEAD, fg=W95_BLUE).pack(pady=(6, 2))
+        sep(self).pack(fill="x", pady=4)
+
+        # ── Notebook ─────────────────────────────────────────────────────────
+        nb = ttk.Notebook(self)
+        nb.pack(fill="both", expand=True, padx=6, pady=4)
+
+        tab_chart = tk.Frame(nb, bg=BG)
+        tab_trans = tk.Frame(nb, bg=BG)
+        nb.add(tab_chart, text="Wealth Chart")
+        nb.add(tab_trans, text="Transcript")
+
+        self._build_chart(tab_chart, g)
+        self._build_transcript(tab_trans, g)
+
+        sep(self).pack(fill="x", pady=4)
+        btn(self, "Back to Results", lambda: self.master._goto(GameOverScreen),
+            color=BG, width=20).pack(pady=6)
+
+    # ── Wealth chart tab ──────────────────────────────────────────────────────
+
+    def _build_chart(self, parent, game):
+        if not game.log.turns:
+            lbl(parent, "No data recorded.", fg=TEXT_DIM, bg=BG).pack(pady=20)
+            return
+
+        canvas = tk.Canvas(parent, bg=W95_WHITE, relief="sunken", bd=2,
+                           highlightthickness=0)
+        canvas.pack(fill="both", expand=True, padx=8, pady=8)
+        canvas.bind("<Configure>",
+                    lambda e, c=canvas, g=game: self._draw_chart(c, g))
+        # First draw after layout settles
+        canvas.after(80, lambda: self._draw_chart(canvas, game))
+
+    def _draw_chart(self, canvas, game):
+        canvas.delete("all")
+        cw = canvas.winfo_width()
+        ch = canvas.winfo_height()
+        if cw < 20 or ch < 20:
+            return
+
+        turns   = game.log.turns
+        names   = [p.name for p in game.players]
+        n       = len(turns)
+
+        # Build series: name → [wealth at each turn start]
+        series = {nm: [t["wealth"].get(nm, 0) for t in turns] for nm in names}
+        max_w  = max((max(v) for v in series.values() if v), default=1) or 1
+
+        PL, PR, PT, PB = 52, 16, 16, 54   # padding: left, right, top, bottom
+        pw = cw - PL - PR    # plot width
+        ph = ch - PT - PB    # plot height
+
+        def tx(i):   # turn index → canvas x
+            return PL + (pw * i // max(n - 1, 1))
+        def ty(v):   # wealth value → canvas y
+            return PT + ph - int(ph * v / max_w)
+
+        # Grid lines + Y axis labels
+        for step in range(6):
+            v   = int(max_w * step / 5)
+            y   = ty(v)
+            canvas.create_line(PL, y, PL + pw, y, fill="#d0d0d0", dash=(2, 4))
+            canvas.create_text(PL - 4, y, text=f"${v}",
+                               font=F_SMALL, anchor="e", fill=TEXT_DIM)
+
+        # Axes
+        canvas.create_line(PL, PT, PL, PT + ph, fill=TEXT, width=1)
+        canvas.create_line(PL, PT + ph, PL + pw, PT + ph, fill=TEXT, width=1)
+
+        # X axis labels
+        for i, rec in enumerate(turns):
+            x = tx(i)
+            canvas.create_text(x, PT + ph + 10, text=str(rec["turn"]),
+                               font=F_SMALL, fill=TEXT_DIM)
+        canvas.create_text(PL + pw // 2, PT + ph + 22,
+                           text="Turn", font=F_SMALL, fill=TEXT_DIM)
+
+        # Player lines + dots
+        for idx, nm in enumerate(names):
+            color = self.PLOT_COLORS[idx % len(self.PLOT_COLORS)]
+            vals  = series[nm]
+            pts   = []
+            for i, v in enumerate(vals):
+                pts += [tx(i), ty(v)]
+            if len(pts) >= 4:
+                canvas.create_line(*pts, fill=color, width=2)
+            for i, v in enumerate(vals):
+                x, y = tx(i), ty(v)
+                canvas.create_oval(x - 3, y - 3, x + 3, y + 3,
+                                   fill=color, outline=color)
+
+        # Legend (below X axis)
+        lx, ly = PL, PT + ph + 36
+        for idx, nm in enumerate(names):
+            color = self.PLOT_COLORS[idx % len(self.PLOT_COLORS)]
+            canvas.create_rectangle(lx, ly, lx + 12, ly + 9,
+                                    fill=color, outline=color)
+            canvas.create_text(lx + 16, ly + 4, text=nm,
+                               font=F_SMALL, anchor="w", fill=TEXT)
+            lx += max(len(nm) * 6, 30) + 26
+            if lx > cw - 80:          # wrap to second legend row
+                lx  = PL
+                ly += 14
+
+    # ── Transcript tab ────────────────────────────────────────────────────────
+
+    def _build_transcript(self, parent, game):
+        frame = tk.Frame(parent, bg=BG)
+        frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+        sb  = tk.Scrollbar(frame)
+        sb.pack(side="right", fill="y")
+
+        txt = tk.Text(frame, font=F_BODY, bg=W95_WHITE, fg=TEXT,
+                      relief="sunken", bd=2, wrap="word",
+                      yscrollcommand=sb.set, state="normal",
+                      spacing1=1, spacing3=1)
+        txt.pack(side="left", fill="both", expand=True)
+        sb.config(command=txt.yview)
+
+        # Colour tags
+        for tag, fg in self.TAG_FG.items():
+            txt.tag_config(tag, foreground=fg)
+        txt.tag_config("header",  foreground=W95_BLUE,
+                       font=("MS Sans Serif", 10, "bold"))
+        txt.tag_config("subhead", foreground=TEXT_DIM,
+                       font=("MS Sans Serif", 8, "italic"))
+
+        # ── Setup header ──
+        txt.insert("end", "=== GAME SETUP ===\n", "header")
+        gs = next((p for p in game.players if p.is_gs), None)
+        if gs:
+            txt.insert("end", f"  General Secretary: {gs.name}\n", "subhead")
+        for p in game.players:
+            ai_note = f"  [AI: {p.ai_type}]" if p.is_ai else ""
+            role_tag = "bad" if "Drow" in p.role else "ok"
+            txt.insert("end", f"  {p.name}{ai_note}  ({p.sector})  —  ", "normal")
+            txt.insert("end", f"{p.role}\n", role_tag)
+        txt.insert("end", "\n")
+
+        # ── Per-turn sections ──
+        for rec in game.log.turns:
+            txt.insert("end",
+                       f"=== TURN {rec['turn']} ===\n", "header")
+            wealth_str = "  ".join(
+                f"{nm}: ${v}" for nm, v in rec["wealth"].items()
+            )
+            txt.insert("end", f"  Wallets: {wealth_str}\n", "subhead")
+            for text, tag in rec["events"]:
+                txt.insert("end", f"  {text}\n",
+                           tag if tag in self.TAG_FG else "normal")
+            txt.insert("end", "\n")
+
+        txt.config(state="disabled")
+        txt.yview_moveto(0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
