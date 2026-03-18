@@ -50,6 +50,7 @@ AI_TYPES = {
     "The Miser":        "Hoards every coin and improves tools. Contributes nothing to the pot.",
     "The Wrecker":      "Sabotages if it serves the Drow. Dangerous and unpredictable.",
     "The Schemer":      "Uses tax to weaken rivals. Cold, calculating, self-serving.",
+    "The Ascetic":      "Donates every coin unless saving for a tool upgrade. Utterly selfless.",
 }
 
 
@@ -178,6 +179,8 @@ class AIPlayer(Player):
             self._act_wrecker(game, log)
         elif self.ai_type == "The Schemer":
             self._act_schemer(game, log)
+        elif self.ai_type == "The Ascetic":
+            self._act_ascetic(game, log)
 
         return log, game.game_over
 
@@ -323,6 +326,22 @@ class AIPlayer(Player):
         # Upgrade tools while still cheap
         if self.improvement < 2:
             self._do_improve(game, log)
+
+    def _act_ascetic(self, game, log):
+        """Donates everything unless saving for or executing a tool upgrade."""
+        if "Brother" in self.role and self._do_dagger(game, log):
+            return
+        # Upgrade tools immediately if affordable
+        self._do_improve(game, log)
+        # If still room to upgrade and not yet able, save exactly what's needed
+        if self.improvement < MAX_IMPROVEMENT:
+            keep = IMPROVEMENT_COST if self.money < IMPROVEMENT_COST else 0
+            if keep:
+                log.append((f"Saving ${keep} toward next tool upgrade.", "dim"))
+            self._do_invest(game, log, max(0, self.money - keep))
+        else:
+            # Tools maxed — donate everything
+            self._do_invest(game, log, self.money)
 
 
 class GameLog:
