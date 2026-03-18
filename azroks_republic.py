@@ -106,11 +106,12 @@ def card(parent, title="", **kw):
     return tk.Frame(parent, bg=BG_CARD, relief="groove", bd=2, padx=8, pady=6, **kw)
 
 def titlebar(parent, title):
-    """Simulate a Win95 dialog title bar."""
-    bar = tk.Frame(parent, bg=W95_BLUE, pady=3, padx=6)
-    tk.Label(bar, text=title, font=("MS Sans Serif", 9, "bold"),
-             fg=W95_WHITE, bg=W95_BLUE).pack(side="left")
-    return bar
+    """Update the app-level Win95 title bar with the current screen title.
+    Returns an invisible placeholder so existing .pack() calls are harmless."""
+    app = parent.winfo_toplevel()
+    if hasattr(app, "_title_lbl"):
+        app._title_lbl.config(text=title)
+    return tk.Frame(parent, height=0)  # zero-height placeholder
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -460,17 +461,69 @@ class App(tk.Tk):
         super().__init__()
         self.title("Azrok's Republic")
         self.configure(bg=BG)
-        self.geometry("900x680")
+        self.overrideredirect(True)   # remove native OS title bar
+
+        # Center on screen
+        self.update_idletasks()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        w, h   = 900, 680
+        self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
         self.minsize(760, 560)
-        # Win95-style ttk defaults
+
+        # ── Custom Win95 title bar ────────────────────────────────────────────
+        self._build_titlebar()
+
+        # ── Win95-style ttk defaults ──────────────────────────────────────────
         style = ttk.Style()
         try:
             style.theme_use("winnative")
         except Exception:
             style.theme_use("default")
+
+        # Alt+F4 still works
+        self.protocol("WM_DELETE_WINDOW", self._confirm_quit)
+
         self.game: GameState = None
         self._frame: tk.Frame = None
         self._goto(SetupScreen)
+
+    def _build_titlebar(self):
+        """Persistent Win95-style title bar: draggable blue strip with X button."""
+        tb = tk.Frame(self, bg=W95_BLUE, pady=2, padx=4)
+        tb.pack(fill="x", side="top")
+
+        self._title_lbl = tk.Label(
+            tb, text="Azrok's Republic",
+            font=("MS Sans Serif", 9, "bold"),
+            fg=W95_WHITE, bg=W95_BLUE,
+        )
+        self._title_lbl.pack(side="left", padx=2)
+
+        close_btn = tk.Button(
+            tb, text="\u00d7",                      # × character
+            font=("MS Sans Serif", 9, "bold"),
+            bg=BG, fg=TEXT,
+            relief="raised", bd=2,
+            padx=4, pady=0, width=2,
+            command=self._confirm_quit,
+        )
+        close_btn.pack(side="right", padx=(2, 2), pady=1)
+
+        # Drag-to-move: bind on the bar and the label (not the button)
+        for widget in (tb, self._title_lbl):
+            widget.bind("<ButtonPress-1>",  self._drag_start)
+            widget.bind("<B1-Motion>",      self._drag_motion)
+
+    def _drag_start(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _drag_motion(self, event):
+        self.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
+
+    def _confirm_quit(self):
+        if messagebox.askyesno("Exit", "Exit Azrok's Republic?", parent=self):
+            self.destroy()
 
     def _goto(self, screen_cls, **kw):
         new = screen_cls(self, **kw)
